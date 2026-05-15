@@ -1,0 +1,21 @@
+[Unit]
+Description=pi-agent Telegram assistant
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi-agent
+WorkingDirectory=/opt/pi-agent
+EnvironmentFile=/opt/pi-agent/.env
+ExecStart=/usr/bin/node /opt/pi-agent/dist/index.js
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+
+[Install]
+WantedBy=multi-user.target
