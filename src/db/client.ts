@@ -1,7 +1,8 @@
 import Database from "better-sqlite3";
+import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { AppConfig } from "../config.js";
-import { messages, toolCalls } from "./schema.js";
+import { approvals, messages, toolCalls } from "./schema.js";
 
 export type InsertMessage = {
   source: string;
@@ -18,6 +19,23 @@ export type InsertToolCall = {
   output: string;
   ok: boolean;
   durationMs: number;
+};
+
+export type ConversationMessage = {
+  role: "user" | "assistant" | "system";
+  content: string;
+};
+
+export type PendingApprovalRecord = {
+  id: string;
+  action: string;
+  payload: string;
+};
+
+export type ApprovalRecord = PendingApprovalRecord & {
+  state: "pending" | "approved" | "rejected" | "expired";
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type DatabaseClient = ReturnType<typeof createDatabaseClient>;
@@ -80,6 +98,87 @@ export function createDatabaseClient(config: AppConfig) {
         ok: input.ok,
         durationMs: input.durationMs,
       });
+    },
+    async listRecentMessages(input: {
+      source: string;
+      chatId?: string;
+      userId?: string;
+      limit: number;
+    }): Promise<ConversationMessage[]> {
+      const filters = [eq(messages.source, input.source)];
+      if (input.chatId) {
+        filters.push(eq(messages.chatId, input.chatId));
+      } else if (input.userId) {
+        filters.push(eq(messages.userId, input.userId));
+      }
+
+      const rows = await db
+        .select({ role: messages.role, content: messages.content })
+        .from(messages)
+        .where(and(...filters))
+        .orderBy(desc(messages.id))
+        .limit(input.limit);
+
+      return rows.reverse();
+    },
+    async createApproval(input: { id: string; action: string; payload: string }): Promise<void> {
+      const now = new Date().toISOString();
+      await db.insert(approvals).values({
+        id: input.id,
+        createdAt: now,
+        updatedAt: now,
+        state: "pending",
+        action: input.action,
+        payload: input.payload,
+      });
+    },
+    async createApprovalRecord(input: {
+      id: string;
+      action: string;
+      payload: string;
+      state: "pending" | "approved" | "rejected" | "expired";
+    }): Promise<void> {
+      const now = new Date().toISOString();
+      await db.insert(approvals).values({
+        id: input.id,
+        createdAt: now,
+        updatedAt: now,
+        state: input.state,
+        action: input.action,
+        payload: input.payload,
+      });
+    },
+    async listPendingApprovals(): Promise<PendingApprovalRecord[]> {
+      return db
+        .select({ id: approvals.id, action: approvals.action, payload: approvals.payload })
+        .from(approvals)
+        .where(eq(approvals.state, "pending"))
+        .orderBy(desc(approvals.createdAt))
+        .limit(5);
+    },
+    async updateApprovalState(input: {
+      id: string;
+      state: "approved" | "rejected" | "expired";
+    }): Promise<void> {
+      await db
+        .update(approvals)
+        .set({ state: input.state, updatedAt: new Date().toISOString() })
+        .where(eq(approvals.id, input.id));
+    },
+    async listApprovalsByAction(input: { action: string; limit: number }): Promise<ApprovalRecord[]> {
+      return db
+        .select({
+          id: approvals.id,
+          action: approvals.action,
+          payload: approvals.payload,
+          state: approvals.state,
+          createdAt: approvals.createdAt,
+          updatedAt: approvals.updatedAt,
+        })
+        .from(approvals)
+        .where(eq(approvals.action, input.action))
+        .orderBy(desc(approvals.createdAt))
+        .limit(input.limit);
     },
   };
 }

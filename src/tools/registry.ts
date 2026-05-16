@@ -4,6 +4,8 @@ import type { AppConfig } from "../config.js";
 import type { DatabaseClient } from "../db/client.js";
 import { createGithubTools } from "./github.js";
 import { createInfraTools } from "./infra.js";
+import { createIotTools } from "./iot.js";
+import { createMemoryTools } from "./memory.js";
 import { createObsidianTools } from "./obsidian.js";
 
 export type ToolRisk = "read" | "write" | "dangerous";
@@ -61,6 +63,8 @@ export function createToolRegistry(
   return {
     ...createGithubTools(config, db),
     ...createInfraTools(config, db),
+    ...createIotTools(config, db),
+    ...createMemoryTools(config, db),
     ...createObsidianTools(config, db),
   };
 }
