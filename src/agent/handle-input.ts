@@ -3,7 +3,7 @@ import type { DatabaseClient } from "../db/client.js";
 import { runAgent } from "../llm/client.js";
 import { createToolRegistry } from "../tools/registry.js";
 import { createIotApprovalGrant, IOT_APPROVAL_GRANT_MS, turnOffIotDevice, turnOnIotDevice } from "../tools/iot.js";
-import { appendApprovedMemory, MEMORY_APPEND_ACTION } from "../tools/memory.js";
+import { appendApprovedMemory, MEMORY_APPEND_ACTION, MEMORY_REPLACE_ACTION, replaceApprovedMemory } from "../tools/memory.js";
 import type { AgentInput } from "../inputs/types.js";
 import { loadStaticContext } from "./context.js";
 
@@ -19,6 +19,19 @@ export async function handleAgentInput(
     role: "user",
     content: input.text,
   });
+
+  const helpAnswer = buildHelpAnswer(input.text);
+  if (helpAnswer) {
+    await db.insertMessage({
+      source: input.source,
+      userId: input.userId,
+      chatId: input.chatId,
+      role: "assistant",
+      content: helpAnswer,
+    });
+
+    return helpAnswer;
+  }
 
   const approvalAnswer = await handlePendingApproval(config, db, input);
   if (approvalAnswer) {
@@ -67,13 +80,14 @@ async function handlePendingApproval(
   const pending = (await db.listPendingApprovals()).find((approval) =>
     approval.action === "iot.turn_off_device" ||
     approval.action === "iot.turn_on_device" ||
-    approval.action === MEMORY_APPEND_ACTION,
+    approval.action === MEMORY_APPEND_ACTION ||
+    approval.action === MEMORY_REPLACE_ACTION,
   );
   if (!pending) {
     return undefined;
   }
 
-  if (pending.action === MEMORY_APPEND_ACTION) {
+  if (pending.action === MEMORY_APPEND_ACTION || pending.action === MEMORY_REPLACE_ACTION) {
     return handleMemoryApproval(config, db, pending, decision);
   }
 
@@ -105,16 +119,66 @@ async function handleMemoryApproval(
   pending: { id: string; payload: string },
   decision: "approve" | "reject",
 ): Promise<string> {
-  const payload = JSON.parse(pending.payload) as { path: string; content: string; reason: string };
+  const payload = JSON.parse(pending.payload) as {
+    path: string;
+    content?: string;
+    find?: string;
+    replaceWith?: string;
+    reason: string;
+  };
 
   if (decision === "reject") {
     await db.updateApprovalState({ id: pending.id, state: "rejected" });
     return `Ок, не записываю memory/${payload.path}.`;
   }
 
-  await appendApprovedMemory(config, payload);
+  if (payload.find !== undefined && payload.replaceWith !== undefined) {
+    await replaceApprovedMemory(config, { path: payload.path, find: payload.find, replaceWith: payload.replaceWith });
+    await db.updateApprovalState({ id: pending.id, state: "approved" });
+    return `Обновил memory/${payload.path}.`;
+  }
+
+  if (payload.content === undefined) {
+    await db.updateApprovalState({ id: pending.id, state: "expired" });
+    return `Не смог применить memory/${payload.path}: approval payload неполный.`;
+  }
+
+  await appendApprovedMemory(config, { path: payload.path, content: payload.content });
   await db.updateApprovalState({ id: pending.id, state: "approved" });
   return `Записал в memory/${payload.path}.`;
+}
+
+function buildHelpAnswer(text: string): string | undefined {
+  const normalized = text.trim().toLowerCase();
+  const compact = normalized.replace(/[?!.]+$/g, "").trim();
+  const helpIntents = [
+    "что ты умеешь",
+    "что умеешь",
+    "помощь",
+    "help",
+    "/help",
+    "как тобой пользоваться",
+    "какие команды",
+    "какие команды тебе задавать",
+    "что можно спросить",
+  ];
+
+  if (!helpIntents.some((intent) => compact.includes(intent))) {
+    return undefined;
+  }
+
+  return [
+    "Можно писать обычным языком. Полезные форматы:",
+    "- `найди в обсидиане AmneziaWG`",
+    "- `прочитай Operations/Pi Agent Operations Map.md`",
+    "- `покажи открытые PR в Enigmadie/pi-agent`",
+    "- `проверь GitHub Actions для Enigmadie/iot-dashboard`",
+    "- `покажи устройства IoT`",
+    "- `выключи plug_plant` -> я попрошу подтверждение",
+    "- `запомни: plug_plant это розетка растения` -> я предложу запись в memory и попрошу подтверждение",
+    "- `plug_plant больше не розетка растения, теперь это розетка увлажнителя` -> я должен предложить исправление старой memory-записи",
+    "Write/deploy/destructive actions требуют подтверждения. Current facts из интернета без live source не выдумываю.",
+  ].join("\n");
 }
 
 function parseApprovalDecision(text: string): "approve" | "reject" | undefined {
