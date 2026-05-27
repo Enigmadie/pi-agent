@@ -20,7 +20,12 @@ const envSchema = z.object({
   AGENT_MEMORY_DIR: z.string().default("./memory"),
   OBSIDIAN_VAULT_PATH: z.string().default("./memory/obsidian-vault"),
   PI5_NOTES_PATH: z.string().default("./memory/obsidian-vault/Projects/Pi 5 infrastructure"),
+  EDGE_HOST: z.string().optional(),
+  CORE_HOST: z.string().optional(),
+  EDGE_SSH_TARGET: z.string().optional(),
+  EDGE_INFRA_PATH: z.string().optional(),
   PI_HOST: z.string().default("127.0.0.1"),
+  IOT_HUB_HOST: z.string().optional(),
   PI_SSH_TARGET: z.string().default("pi-user@pi-host"),
   PI_INFRA_PATH: z.string().default("/home/pi-user/infra"),
   SYSTEMD_ALLOWED_SERVICES: z
@@ -34,7 +39,15 @@ const envSchema = z.object({
     ),
 });
 
-export type AppConfig = z.infer<typeof envSchema>;
+type EnvConfig = z.infer<typeof envSchema>;
+
+export type AppConfig = EnvConfig & {
+  EDGE_HOST: string;
+  CORE_HOST: string;
+  EDGE_SSH_TARGET: string;
+  EDGE_INFRA_PATH: string;
+  IOT_HUB_HOST: string;
+};
 
 export function loadConfig(): AppConfig {
   const parsed = envSchema.safeParse(process.env);
@@ -46,5 +59,12 @@ export function loadConfig(): AppConfig {
     throw new Error(`Invalid environment config:\n${details}`);
   }
 
-  return parsed.data;
+  return {
+    ...parsed.data,
+    EDGE_HOST: parsed.data.EDGE_HOST ?? parsed.data.PI_HOST,
+    CORE_HOST: parsed.data.CORE_HOST ?? parsed.data.IOT_HUB_HOST ?? parsed.data.PI_HOST,
+    EDGE_SSH_TARGET: parsed.data.EDGE_SSH_TARGET ?? parsed.data.PI_SSH_TARGET,
+    EDGE_INFRA_PATH: parsed.data.EDGE_INFRA_PATH ?? parsed.data.PI_INFRA_PATH,
+    IOT_HUB_HOST: parsed.data.IOT_HUB_HOST ?? parsed.data.CORE_HOST ?? parsed.data.PI_HOST,
+  };
 }

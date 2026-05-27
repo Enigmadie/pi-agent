@@ -1,0 +1,21 @@
+[Unit]
+Description=home-agent Telegram assistant and homelab orchestrator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=godo
+WorkingDirectory=/home/godo/home-agent
+EnvironmentFile=/home/godo/home-agent/.env
+ExecStart=/usr/bin/node /home/godo/home-agent/dist/index.js
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+
+[Install]
+WantedBy=multi-user.target

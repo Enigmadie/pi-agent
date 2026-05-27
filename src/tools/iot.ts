@@ -305,7 +305,7 @@ async function requestIotHub(
     const serializedBody = body === undefined ? undefined : JSON.stringify(body);
     const request = http.request(
       {
-        hostname: config.PI_HOST,
+        hostname: config.IOT_HUB_HOST,
         port: 80,
         path,
         method,

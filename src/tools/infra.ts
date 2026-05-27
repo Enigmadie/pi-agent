@@ -64,7 +64,7 @@ export function createInfraTools(
       db,
       execute: async ({ stack }) =>
         runReadOnlyCommand("docker", ["compose", ...composeFile(stack), "ps", "--format", "json"], {
-          cwd: `${config.PI_INFRA_PATH}/docker`,
+          cwd: `${config.EDGE_INFRA_PATH}/docker`,
         }),
     }),
     infra_systemd_status: createLoggedTool({
@@ -131,12 +131,39 @@ export async function executeComposeServiceRestart(
   config: AppConfig,
   payload: ComposeServiceRestartPayload,
 ): Promise<{ stdout: string; stderr: string }> {
-  const result = await runCommand("docker", ["compose", ...composeFile(payload.stack), "restart", payload.service], {
-    cwd: `${config.PI_INFRA_PATH}/docker`,
-    timeoutMs: 60_000,
-  });
+  const result = await runComposeServiceRestart(config, payload);
   console.log(`pi-agent compose restart stack=${payload.stack} service=${payload.service} stdout=${JSON.stringify(result.stdout)} stderr=${JSON.stringify(result.stderr)}`);
   return result;
+}
+
+function runComposeServiceRestart(
+  config: AppConfig,
+  payload: ComposeServiceRestartPayload,
+): Promise<{ stdout: string; stderr: string }> {
+  if (payload.service === "iot-hub") {
+    return runCommand("docker", ["compose", "-f", "/opt/homelab/iot-hub/compose.yml", "restart", "iot-hub"], {
+      timeoutMs: 60_000,
+    });
+  }
+
+  if (payload.service === "iot-dashboard") {
+    return runCommand("docker", ["compose", "-f", "/opt/homelab/iot-dashboard/compose.yml", "restart", "iot-dashboard"], {
+      timeoutMs: 60_000,
+    });
+  }
+
+  return runCommand(
+    "ssh",
+    [
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "StrictHostKeyChecking=accept-new",
+      config.EDGE_SSH_TARGET,
+      `cd ${config.EDGE_INFRA_PATH}/docker && docker compose -f compose.iot.yml restart ${payload.service}`,
+    ],
+    { timeoutMs: 60_000 },
+  );
 }
 
 export function describeComposeServiceRestart(payload: ComposeServiceRestartPayload): string {
